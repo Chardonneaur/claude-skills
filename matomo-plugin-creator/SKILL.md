@@ -213,13 +213,25 @@ Read `references/marketplace-scaffolding.md` for full details, then generate:
 - `LICENSE` (GPL v3+)
 - `screenshots/` (placeholder note for user to add)
 - `docs/index.md` + `docs/faq.md`
-- `.gitignore` for IDE files, node_modules, vendor/
+- `.gitignore` for IDE files, node_modules, vendor/ (NOT vue/dist/)
 
-### Optional GitHub setup
+### Vue build step
+If the plugin has Vue 3 components, the frontend MUST be built before publishing:
+1. Run `./console vue:build PluginName` from Matomo root
+2. Commit the `vue/dist/` output to the repository
+3. The Marketplace archive excludes `vue/src/` but includes `vue/dist/`
+
+Read `references/marketplace-scaffolding.md` § Vue Build Step for details.
+
+### GitHub setup & CI/CD
 If the user requested GitHub integration:
 - Generate `.gitignore`, `README.md`
+- Generate `.github/workflows/matomo-tests.yml` for automated testing
+  (use `./console generate:test-action --plugin="PluginName"` or manual template)
 - Provide instructions for Marketplace webhook setup
-- Explain tag-based versioning (`git tag 1.0.0 && git push --tags`)
+- Explain tag-based versioning (`git tag 1.0.0 && git push origin main --tags`)
+
+Read `references/marketplace-scaffolding.md` § CI/CD with GitHub Actions for workflow templates.
 
 ---
 
@@ -283,6 +295,10 @@ PluginName/
 ├── README.md
 ├── CHANGELOG.md
 ├── LICENSE
+├── .gitignore
+├── .github/
+│   └── workflows/
+│       └── matomo-tests.yml
 ├── PluginName.php
 ├── API.php
 ├── Archiver.php
@@ -295,7 +311,9 @@ PluginName/
 ├── Reports/
 ├── Widgets/
 ├── templates/
-├── vue/src/
+├── vue/
+│   ├── src/
+│   └── dist/              ← built output, MUST be committed
 ├── lang/en.json
 ├── config/config.php
 ├── Updates/
