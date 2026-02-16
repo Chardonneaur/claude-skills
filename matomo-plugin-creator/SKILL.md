@@ -75,6 +75,11 @@ Reference files to read during this phase:
 - `references/plugin-types.md` — for class patterns and hook references
 - `references/archiver-patterns.md` — for Archiver/RecordBuilder design
 - `references/permissions-reference.md` — for access control design
+- `references/config-di-patterns.md` — for DI container and service registration
+- `references/updates-migrations.md` — for database migrations and plugin lifecycle
+- `references/segment-integration.md` — for custom segments and sqlFilter patterns
+- `references/tag-manager-integration.md` — for Tag Manager custom tags/triggers/variables
+- `references/vue3-advanced-patterns.md` — for advanced Vue 3 component patterns
 
 ---
 
@@ -88,11 +93,13 @@ user a brief status report with the opportunity to make corrections.
 | Module | Description | Depends on |
 |--------|-------------|------------|
 | **Core** | Main plugin class, plugin.json, translations, GPL headers | — |
+| **DI Config** | config/config.php, service registration, decorators | Core |
 | **Tracking** | Dimensions (Visit/Action), tracker.js, Tag Manager extensions | Core |
 | **Archiver** | RecordBuilder or classic Archiver, aggregation logic | Core, Tracking |
 | **API** | API.php with all endpoints, access checks | Core, Archiver |
 | **Reporting** | Report classes, Widgets, Visualizations | Core, API |
 | **Admin UI** | Settings, Controller, Menu, Twig templates, Vue 3 components | Core |
+| **Updates** | Database migrations, version updates, install/uninstall lifecycle | Core |
 | **Scheduled Tasks** | Tasks.php for cron jobs | Core, API |
 
 Not every plugin needs every module. Skip modules that aren't relevant to the plugin scope.
@@ -125,6 +132,14 @@ These rules are non-negotiable:
 
 7. **Admin UI** — Support both Twig templates and Vue 3 components.
    Read `references/plugin-types.md` for patterns of both approaches.
+   Read `references/vue3-advanced-patterns.md` for TypeScript, stores, and CoreHome imports.
+
+8. **DI Config** — If the plugin registers services, decorators, or modifies framework
+   behavior, create `config/config.php`. Read `references/config-di-patterns.md`.
+
+9. **Updates** — If the plugin has database tables, provide install/uninstall lifecycle
+   methods. For schema changes in later versions, use versioned Updates files.
+   Read `references/updates-migrations.md`.
 
 ---
 
@@ -139,6 +154,13 @@ After ALL modules are implemented, run through these checks:
 - GPL header present in every PHP file
 - No `var_dump()`, `print_r()`, `error_log()`, or debug code
 - All translation keys in code exist in `lang/en.json`
+
+### Testing
+Read `references/testing-patterns.md` for test structure and patterns, then generate:
+- Unit tests for models, validators, and pure logic classes
+- Integration tests for API methods and database interactions
+- Place tests in `tests/Unit/` and `tests/Integration/` directories
+- Follow Matomo test naming conventions: `test_methodName_expectedBehavior`
 
 ### Performance review
 Read `references/archiver-patterns.md` for performance guidance, then verify:
@@ -224,6 +246,12 @@ Always use HTTPS. Never log or display the token_auth back to the user.
 | Reporting | Reports/*, API.php, Widgets/*, Archiver.php | `references/plugin-types.md` § Reporting |
 | Admin | Settings.php, Controller.php, Menu.php | `references/plugin-types.md` § Admin |
 | Archiver | Archiver.php, RecordBuilders/ | `references/archiver-patterns.md` |
+| DI Config | config/config.php, service registration | `references/config-di-patterns.md` |
+| Updates | Updates/*.php, install(), uninstall() | `references/updates-migrations.md` |
+| Segments | Columns/*, Segment definitions | `references/segment-integration.md` |
+| Tag Manager | Tags, Triggers, Variables templates | `references/tag-manager-integration.md` |
+| Vue 3 | vue/src/*, stores, TypeScript components | `references/vue3-advanced-patterns.md` |
+| Testing | tests/Unit/*, tests/Integration/* | `references/testing-patterns.md` |
 | Security | (all types) | `references/security-checklist.md` |
 | Permissions | (all types) | `references/permissions-reference.md` |
 | Marketplace | plugin.json, README.md, tests/ | `references/marketplace-scaffolding.md` |
@@ -242,8 +270,10 @@ PluginName/
 ├── Reports/
 ├── Settings.php
 ├── templates/
-└── lang/
-    └── en.json
+├── lang/
+│   └── en.json
+└── tests/
+    └── Unit/
 ```
 
 ### Marketplace-Ready
@@ -268,9 +298,13 @@ PluginName/
 ├── vue/src/
 ├── lang/en.json
 ├── config/config.php
+├── Updates/
+│   └── 1.0.0.php
 ├── screenshots/
-├── tests/Unit/
-├── tests/Integration/
+├── tests/
+│   ├── Unit/
+│   ├── Integration/
+│   └── Fixtures/
 └── docs/
 ```
 
@@ -292,6 +326,22 @@ PluginName/
 - **memory.md** — Decision log: tracks user choices, reference sources, per-plugin context.
   Update this whenever the user makes an architectural decision.
 - **README.md** — Human-facing documentation, skill structure, disclaimer.
+
+### Reference Files
+
+| File | Topic |
+|------|-------|
+| `references/plugin-types.md` | Plugin class templates, hook patterns |
+| `references/archiver-patterns.md` | RecordBuilder, classic Archiver, LogAggregator |
+| `references/security-checklist.md` | Security audit checklist with code examples |
+| `references/permissions-reference.md` | Access control model and permission checks |
+| `references/marketplace-scaffolding.md` | Marketplace packaging requirements |
+| `references/config-di-patterns.md` | DI container, service registration, decorators |
+| `references/updates-migrations.md` | Version updates, schema migrations, lifecycle |
+| `references/segment-integration.md` | Segment definitions, sqlFilter, match types |
+| `references/tag-manager-integration.md` | Custom tags, triggers, variables |
+| `references/testing-patterns.md` | Unit, integration, system, Vue/TS tests |
+| `references/vue3-advanced-patterns.md` | TypeScript, stores, CoreHome imports, forms |
 
 ## Recommended Companion Skills
 

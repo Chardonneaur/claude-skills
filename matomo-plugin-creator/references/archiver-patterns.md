@@ -368,3 +368,243 @@ $processor->aggregateNumericMetrics(['MyPlugin_metricA', 'MyPlugin_metricB']);
 7. **Partial archives** — For plugins with many reports, support partial archiving
    by checking `$this->isRequestedReport('RecordName')` in classic Archivers.
    RecordBuilders handle this automatically via `getRecordMetadata()`.
+
+---
+
+## Parameterized RecordBuilders
+
+When a RecordBuilder needs parameters (e.g. one builder per entity like goal, form, or funnel),
+it cannot be auto-discovered. Register it via the `Archiver.addRecordBuilders` event.
+
+### Constructor with parameters
+
+```php
+<?php
+
+namespace Piwik\Plugins\{PluginName}\RecordBuilders;
+
+use Piwik\ArchiveProcessor;
+use Piwik\ArchiveProcessor\Record;
+use Piwik\ArchiveProcessor\RecordBuilder;
+
+class EntityRecordBuilder extends RecordBuilder
+{
+    private int $entityId;
+    private string $entityName;
+
+    public function __construct(int $entityId, string $entityName)
+    {
+        parent::__construct();
+        $this->entityId = $entityId;
+        $this->entityName = $entityName;
+
+        $this->maxRowsInTable = 500;
+        $this->columnToSortByBeforeTruncation = Metrics::INDEX_NB_VISITS;
+    }
+
+    public function getRecordMetadata(ArchiveProcessor $archiveProcessor): array
+    {
+        return [
+            Record::make(Record::TYPE_BLOB, "{PluginName}_entity_{$this->entityId}"),
+            Record::make(Record::TYPE_NUMERIC, "{PluginName}_entity_{$this->entityId}_total"),
+        ];
+    }
+
+    public function buildFromLogs(ArchiveProcessor $archiveProcessor): void
+    {
+        $logAggregator = $archiveProcessor->getLogAggregator();
+        // Use $this->entityId to filter queries
+        $query = $logAggregator->queryVisitsByDimension(
+            dimensions: ['log_visit.some_dimension'],
+            where: "log_visit.entity_id = {$this->entityId}",
+        );
+        // ... process results
+    }
+
+    public function buildForNonDayPeriod(ArchiveProcessor $archiveProcessor): void
+    {
+        $archiveProcessor->aggregateDataTableRecords(
+            ["{PluginName}_entity_{$this->entityId}"],
+            $this->maxRowsInTable
+        );
+        $archiveProcessor->aggregateNumericMetrics(
+            ["{PluginName}_entity_{$this->entityId}_total"]
+        );
+    }
+}
+```
+
+### Event registration with lazy loading
+
+```php
+// In your main plugin class
+public function registerEvents(): array
+{
+    return [
+        'Archiver.addRecordBuilders' => 'addRecordBuilders',
+    ];
+}
+
+public function addRecordBuilders(array &$recordBuilders): void
+{
+    // Load entities from DB and create a builder for each
+    $model = new Model();
+    $entities = $model->getAllActiveEntities();
+
+    foreach ($entities as $entity) {
+        $recordBuilders[] = new RecordBuilders\EntityRecordBuilder(
+            (int) $entity['id'],
+            $entity['name']
+        );
+    }
+}
+```
+
+---
+
+## Custom Metrics
+
+### Computing derived metrics (ratios, percentages)
+
+When you need metrics like conversion rates, bounce rates, or averages that are
+derived from other metrics, compute them during day archiving and store as numeric records:
+
+```php
+public function buildFromLogs(ArchiveProcessor $archiveProcessor): void
+{
+    $logAggregator = $archiveProcessor->getLogAggregator();
+
+    // Get raw counts
+    $query = $logAggregator->queryVisitsByDimension(
+        dimensions: ['log_visit.example_dimension'],
+        additionalSelects: [
+            'SUM(CASE WHEN log_visit.visit_total_actions > 1 THEN 1 ELSE 0 END) AS engaged_visits',
+            'SUM(log_visit.visit_total_time) AS total_time',
+        ],
+    );
+
+    $table = new DataTable();
+    $totalVisits = 0;
+    $totalTime = 0;
+
+    while ($row = $query->fetch()) {
+        $visits = (int) $row[Metrics::INDEX_NB_VISITS];
+        $totalVisits += $visits;
+        $totalTime += (int) $row['total_time'];
+
+        $table->addRowFromSimpleArray([
+            'label'                      => $row['label'] ?? '',
+            Metrics::INDEX_NB_VISITS     => $visits,
+            Metrics::INDEX_NB_UNIQ_VISITORS => (int) $row[Metrics::INDEX_NB_UNIQ_VISITORS],
+        ]);
+    }
+
+    // Store blob record
+    $archiveProcessor->insertBlobRecord(
+        '{PluginName}_report',
+        $table->getSerialized($this->maxRowsInTable)
+    );
+
+    // Store derived numeric metrics
+    $archiveProcessor->insertNumericRecord('{PluginName}_totalVisits', $totalVisits);
+    $archiveProcessor->insertNumericRecord('{PluginName}_totalTime', $totalTime);
+    $archiveProcessor->insertNumericRecord(
+        '{PluginName}_avgTimePerVisit',
+        $totalVisits > 0 ? round($totalTime / $totalVisits) : 0
+    );
+}
+```
+
+---
+
+## Segment-Aware Archiving
+
+LogAggregator handles segments automatically. When Matomo archives data with a segment
+applied, LogAggregator adds the segment's WHERE conditions to all queries.
+
+### How it works
+
+You don't need to do anything special — just use LogAggregator methods:
+
+```php
+// This query automatically respects segments
+$query = $logAggregator->queryVisitsByDimension(['log_visit.country']);
+
+// The LogAggregator internally:
+// 1. Joins necessary log tables based on the segment definition
+// 2. Adds WHERE conditions for the segment
+// 3. Applies date range filtering
+// 4. Handles parameter binding safely
+```
+
+### When raw SQL is needed
+
+If you must use raw SQL (e.g. for complex queries not supported by LogAggregator),
+get the segment's SQL from the LogAggregator:
+
+```php
+public function buildFromLogs(ArchiveProcessor $archiveProcessor): void
+{
+    $logAggregator = $archiveProcessor->getLogAggregator();
+
+    // Get segment + date WHERE clause and bindings
+    $where = $logAggregator->getWhereStatement('log_visit', 'visit_last_action_time');
+    $from = $logAggregator->getFrom(); // table joins for segment
+
+    $sql = "SELECT log_visit.my_column, COUNT(*) as cnt
+            FROM " . Common::prefixTable('log_visit') . " AS log_visit
+            $from
+            WHERE $where
+            GROUP BY log_visit.my_column";
+
+    $bind = $logAggregator->getBindings();
+    $result = Db::fetchAll($sql, $bind);
+}
+```
+
+---
+
+## Action Type Filtering
+
+When building archivers that process action-level data, filter by action type
+to get the correct data:
+
+```php
+use Piwik\Tracker\Action;
+
+public function buildFromLogs(ArchiveProcessor $archiveProcessor): void
+{
+    $logAggregator = $archiveProcessor->getLogAggregator();
+
+    // Page views only (type 1)
+    $query = $logAggregator->queryActionsByDimension(
+        dimensions: ['log_action.name'],
+        where: 'log_action.type = ' . Action::TYPE_PAGE_URL,
+    );
+
+    // Outlinks only (type 2)
+    $query = $logAggregator->queryActionsByDimension(
+        dimensions: ['log_action.name'],
+        where: 'log_action.type = ' . Action::TYPE_OUTLINK,
+    );
+
+    // Downloads only (type 3)
+    $query = $logAggregator->queryActionsByDimension(
+        dimensions: ['log_action.name'],
+        where: 'log_action.type = ' . Action::TYPE_DOWNLOAD,
+    );
+}
+```
+
+### Action type constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `Action::TYPE_PAGE_URL` | 1 | Page view URLs |
+| `Action::TYPE_OUTLINK` | 2 | Outbound link clicks |
+| `Action::TYPE_DOWNLOAD` | 3 | File downloads |
+| `Action::TYPE_PAGE_TITLE` | 4 | Page titles |
+| `Action::TYPE_SITE_SEARCH` | 8 | Site search keywords |
+| `Action::TYPE_EVENT_CATEGORY` | 9 | Event categories |
+| `Action::TYPE_EVENT_ACTION` | 11 | Event actions |
+| `Action::TYPE_EVENT_NAME` | 12 | Event names |

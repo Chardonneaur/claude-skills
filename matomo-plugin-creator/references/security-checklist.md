@@ -13,7 +13,12 @@ Every check includes a code example showing the CORRECT and INCORRECT approach.
 4. [Access Control Audit](#4-access-control-audit)
 5. [Dependency & Code Audit](#5-dependency--code-audit)
 6. [Performance Security](#6-performance-security)
-7. [Final Checklist](#7-final-checklist)
+7. [Object Injection Prevention](#7-object-injection-prevention)
+8. [File Upload Security](#8-file-upload-security)
+9. [Cookie Security](#9-cookie-security)
+10. [Error Handling Security](#10-error-handling-security)
+11. [Logging Security](#11-logging-security)
+12. [Final Checklist](#12-final-checklist)
 
 ---
 
@@ -340,7 +345,165 @@ $expected === $actual;
 
 ---
 
-## 7. Final Checklist
+## 7. Object Injection Prevention
+
+### Never unserialize user input
+
+PHP's `unserialize()` can trigger arbitrary object instantiation and method calls:
+
+```php
+// ❌ DANGEROUS — arbitrary code execution via crafted payloads
+$data = unserialize($userInput);
+
+// ❌ STILL DANGEROUS — even with allowed_classes, exploits exist
+$data = unserialize($userInput, ['allowed_classes' => ['MyClass']]);
+
+// ✅ CORRECT — use JSON for user-provided data
+$data = json_decode($userInput, true);
+
+// ✅ CORRECT — use Matomo's safe unserialize for internal data
+$data = Common::safe_unserialize($trustedInternalData);
+```
+
+### Prefer JSON over serialization
+
+When storing structured data in the database:
+
+```php
+// ✅ CORRECT — JSON storage
+$db->query("INSERT INTO ... VALUES (?)", [json_encode($data)]);
+$data = json_decode($row['data'], true);
+
+// ❌ AVOID — PHP serialization in new code
+$db->query("INSERT INTO ... VALUES (?)", [serialize($data)]);
+```
+
+---
+
+## 8. File Upload Security
+
+### MIME type validation
+
+Never trust the client-provided MIME type:
+
+```php
+// ✅ CORRECT — validate MIME type server-side
+$finfo = new \finfo(FILEINFO_MIME_TYPE);
+$mimeType = $finfo->file($tmpPath);
+$allowedTypes = ['image/png', 'image/jpeg', 'image/gif'];
+
+if (!in_array($mimeType, $allowedTypes, true)) {
+    throw new \Exception('Invalid file type');
+}
+
+// ❌ WRONG — trusting client-provided type
+$mimeType = $_FILES['upload']['type']; // can be spoofed
+```
+
+### Path traversal prevention
+
+```php
+// ✅ CORRECT — sanitize filename, use basename
+$filename = basename($uploadedName);
+$filename = preg_replace('/[^a-zA-Z0-9._-]/', '', $filename);
+$targetPath = PIWIK_DOCUMENT_ROOT . '/tmp/uploads/' . $filename;
+
+// ❌ WRONG — user-controlled path
+$targetPath = PIWIK_DOCUMENT_ROOT . '/' . $userProvidedPath;
+```
+
+### Temp file handling
+
+```php
+// ✅ CORRECT — use Matomo's tmp directory, clean up after processing
+$tmpDir = StaticContainer::get('path.tmp') . '/uploads/';
+// Process file, then delete
+@unlink($tmpPath);
+```
+
+---
+
+## 9. Cookie Security
+
+### Secure cookie attributes
+
+When setting cookies, always use secure attributes:
+
+```php
+// ✅ CORRECT — secure cookie with all flags
+Common::setCookie('my_cookie', $value, $expire, $path, $domain, $secure = true, $httpOnly = true, $sameSite = 'Lax');
+
+// ❌ WRONG — cookie without security flags
+setcookie('my_cookie', $value); // no HttpOnly, no Secure, no SameSite
+```
+
+### Cookie guidelines
+
+- **HttpOnly**: Always set for cookies not needed by JavaScript (prevents XSS theft)
+- **Secure**: Always set in production (prevents transmission over HTTP)
+- **SameSite**: Use `Lax` (default) or `Strict` (prevents CSRF via cookies)
+- **Never store secrets in cookies** — store only session IDs or non-sensitive preferences
+
+---
+
+## 10. Error Handling Security
+
+### No stack traces in responses
+
+```php
+// ✅ CORRECT — generic error message to user, log details
+try {
+    $this->processData($input);
+} catch (\Exception $e) {
+    Log::error('Processing failed: ' . $e->getMessage());
+    throw new \Exception(Piwik::translate('MyPlugin_ProcessingError'));
+}
+
+// ❌ WRONG — exposing stack trace and internal paths
+try {
+    $this->processData($input);
+} catch (\Exception $e) {
+    echo $e->getTraceAsString(); // reveals file paths, class names
+}
+```
+
+### No internal paths in output
+
+```php
+// ❌ WRONG — reveals server file structure
+echo "Error in " . __FILE__ . " line " . __LINE__;
+
+// ✅ CORRECT — use translation keys for user-facing errors
+throw new \Exception(Piwik::translate('MyPlugin_InvalidInput'));
+```
+
+---
+
+## 11. Logging Security
+
+### Never log sensitive data
+
+```php
+// ❌ WRONG — logging credentials and tokens
+Log::debug('API call with token: ' . $tokenAuth);
+Log::info('User password: ' . $password);
+
+// ✅ CORRECT — log actions without sensitive values
+Log::debug('API call received for method: ' . $method);
+Log::info('User authentication attempt for login: ' . $login);
+```
+
+### Guidelines
+
+- Never log `token_auth`, passwords, API keys, or session IDs
+- Never log personally identifiable information (PII) like email addresses or IP addresses
+  unless the Matomo instance is specifically configured to collect them
+- Use Matomo's `Log` class, not `error_log()` or `file_put_contents()`
+- In production, ensure debug-level logging is disabled
+
+---
+
+## 12. Final Checklist
 
 Run through this checklist for every generated plugin:
 
@@ -355,6 +518,11 @@ Run through this checklist for every generated plugin:
 - [ ] **External links**: `rel="noreferrer noopener"` on all external links
 - [ ] **No forbidden functions**: No eval, exec, passthru, system, popen
 - [ ] **No hardcoded secrets**: All credentials in Settings framework
+- [ ] **Object injection**: No `unserialize()` on user input, use JSON or `safe_unserialize()`
+- [ ] **File uploads**: Server-side MIME validation, no path traversal, temp file cleanup
+- [ ] **Cookie security**: HttpOnly, Secure, SameSite flags on all cookies
+- [ ] **Error handling**: No stack traces or internal paths in user-facing output
+- [ ] **Logging**: No tokens, passwords, PII, or secrets in log output
 - [ ] **PHP file format**: Files start with `<?php`, never close the tag
 - [ ] **File extensions**: All PHP scripts use `.php` extension
 - [ ] **No debug code**: No var_dump, print_r, error_log left in code
