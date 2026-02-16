@@ -79,7 +79,8 @@ Reference files to read during this phase:
 - `references/updates-migrations.md` — for database migrations and plugin lifecycle
 - `references/segment-integration.md` — for custom segments and sqlFilter patterns
 - `references/tag-manager-integration.md` — for Tag Manager custom tags/triggers/variables
-- `references/vue3-advanced-patterns.md` — for advanced Vue 3 component patterns
+- `references/twig-admin-patterns.md` — for Twig + jQuery admin pages (default approach)
+- `references/vue3-advanced-patterns.md` — for Vue 3 component patterns (requires dev checkout)
 
 ---
 
@@ -130,9 +131,25 @@ These rules are non-negotiable:
 6. **Archiver pattern** — Prefer RecordBuilder (Matomo 5.x) over classic Archiver.
    Read `references/archiver-patterns.md` before implementing any archiving logic.
 
-7. **Admin UI** — Support both Twig templates and Vue 3 components.
-   Read `references/plugin-types.md` for patterns of both approaches.
-   Read `references/vue3-advanced-patterns.md` for TypeScript, stores, and CoreHome imports.
+7. **Admin UI** — **Default to Twig + jQuery** for admin pages. This works on all
+   Matomo installs (production and dev) with zero build step. Vue 3 components are
+   optional and require a dev checkout with `./console vue:build` (not available on
+   production installs from zip).
+   Read `references/twig-admin-patterns.md` for the Twig + jQuery patterns (primary).
+   Read `references/vue3-advanced-patterns.md` for Vue 3 patterns (optional, dev-only).
+
+   **Critical Admin UI rules:**
+   - Load data **server-side** in the Controller, pass to Twig — never rely on
+     client-side AJAX for initial page data (avoids auth/timing issues)
+   - Use `Nonce` for CSRF protection on form POST actions
+   - Do NOT use `ajaxHelper` in inline `<script>` blocks — it is defined in UMD
+     bundles that may load after inline scripts execute. Use `$.ajax` if AJAX is needed.
+   - Materialize CSS hides native checkboxes — add CSS override:
+     `opacity: 1; position: static; pointer-events: auto;`
+   - Twig translations in JS: `'{{ "Key"|translate|e("js") }}'` (quotes outside Twig tags).
+     NEVER `{{ "'Key'|translate|e('js')" }}` (this outputs raw text, filters not applied)
+   - Menu placement: `addMeasurableItem()` for website features, `addSystemItem()` for
+     system/platform features, `addDiagnosticItem()` for diagnostic tools
 
 8. **DI Config** — If the plugin registers services, decorators, or modifies framework
    behavior, create `config/config.php`. Read `references/config-di-patterns.md`.
@@ -256,7 +273,7 @@ Always use HTTPS. Never log or display the token_auth back to the user.
 |------|-----------|-----------|
 | Tracking | Columns/*, tracker.js, TrackingDimensions | `references/plugin-types.md` § Tracking |
 | Reporting | Reports/*, API.php, Widgets/*, Archiver.php | `references/plugin-types.md` § Reporting |
-| Admin | Settings.php, Controller.php, Menu.php | `references/plugin-types.md` § Admin |
+| Admin | Settings.php, Controller.php, Menu.php, Twig | `references/twig-admin-patterns.md` |
 | Archiver | Archiver.php, RecordBuilders/ | `references/archiver-patterns.md` |
 | DI Config | config/config.php, service registration | `references/config-di-patterns.md` |
 | Updates | Updates/*.php, install(), uninstall() | `references/updates-migrations.md` |
@@ -359,6 +376,7 @@ PluginName/
 | `references/segment-integration.md` | Segment definitions, sqlFilter, match types |
 | `references/tag-manager-integration.md` | Custom tags, triggers, variables |
 | `references/testing-patterns.md` | Unit, integration, system, Vue/TS tests |
+| `references/twig-admin-patterns.md` | Twig + jQuery admin pages (default approach) |
 | `references/vue3-advanced-patterns.md` | TypeScript, stores, CoreHome imports, forms |
 
 ## Recommended Companion Skills
